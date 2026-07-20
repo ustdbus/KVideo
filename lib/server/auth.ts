@@ -1,4 +1,4 @@
-import { Redis } from '@upstash/redis';
+import { Redis } from '@upstash/redis/cloudflare';
 import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeFeatures } from '@/lib/server/runtime-features';
 import {
@@ -89,6 +89,13 @@ const effectiveAdminPassword = ADMIN_PASSWORD || ACCESS_PASSWORD;
 
 let cachedRedis: Redis | null | undefined;
 
+export class ManagedAuthStorageError extends Error {
+  constructor(operation: 'read' | 'write', cause?: unknown) {
+    super(`Managed auth storage ${operation} failed`, { cause });
+    this.name = 'ManagedAuthStorageError';
+  }
+}
+
 function getRedisClient(): Redis | null {
   if (cachedRedis !== undefined) {
     return cachedRedis;
@@ -99,7 +106,10 @@ function getRedisClient(): Redis | null {
     return cachedRedis;
   }
 
-  cachedRedis = Redis.fromEnv();
+  cachedRedis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  });
   return cachedRedis;
 }
 
@@ -140,8 +150,9 @@ async function readManagedAccounts(): Promise<StoredAccountRecord[]> {
     const stored = await redis.get(MANAGED_ACCOUNTS_KEY);
     if (!Array.isArray(stored)) return [];
     return stored.filter(isStoredAccountRecord).map(normalizeStoredAccount);
-  } catch {
-    return [];
+  } catch (error) {
+    console.error('Managed auth Redis read failed:', error);
+    throw new ManagedAuthStorageError('read', error);
   }
 }
 
@@ -151,7 +162,12 @@ async function saveManagedAccounts(accounts: StoredAccountRecord[]): Promise<voi
     throw new Error('Managed auth storage unavailable');
   }
 
-  await redis.set(MANAGED_ACCOUNTS_KEY, accounts);
+  try {
+    await redis.set(MANAGED_ACCOUNTS_KEY, accounts);
+  } catch (error) {
+    console.error('Managed auth Redis write failed:', error);
+    throw new ManagedAuthStorageError('write', error);
+  }
 }
 
 function getBootstrapSeeds(): SeedAccountInput[] {
