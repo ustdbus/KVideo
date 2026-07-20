@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis/cloudflare';
+import { getOptionalRequestContext } from '@cloudflare/next-on-pages';
 import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeFeatures } from '@/lib/server/runtime-features';
 import {
@@ -86,8 +87,21 @@ const DANMAKU_API_URL = process.env.DANMAKU_API_URL || process.env.NEXT_PUBLIC_D
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const MANAGED_AUTH_FORCED = process.env.MANAGED_AUTH_ENABLED === 'true';
 
+function getRuntimeEnvValue(name: string, fallback = ''): string {
+  try {
+    const runtimeEnv = getOptionalRequestContext()?.env as unknown as Record<string, unknown> | undefined;
+    const value = runtimeEnv?.[name];
+    if (typeof value === 'string') return value;
+  } catch {
+    // Outside Cloudflare's request runtime, fall back to process.env.
+  }
+
+  return process.env[name] || fallback;
+}
+
 function getEffectiveAdminPassword(): string {
-  return process.env.ADMIN_PASSWORD || process.env.ACCESS_PASSWORD || ADMIN_PASSWORD || ACCESS_PASSWORD;
+  return getRuntimeEnvValue('ADMIN_PASSWORD', ADMIN_PASSWORD) ||
+    getRuntimeEnvValue('ACCESS_PASSWORD', ACCESS_PASSWORD);
 }
 
 let cachedRedis: Redis | null | undefined;
@@ -104,20 +118,22 @@ function getRedisClient(): Redis | null {
     return cachedRedis;
   }
 
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+  const url = getRuntimeEnvValue('UPSTASH_REDIS_REST_URL');
+  const token = getRuntimeEnvValue('UPSTASH_REDIS_REST_TOKEN');
+  if (!url || !token) {
     cachedRedis = null;
     return cachedRedis;
   }
 
   cachedRedis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    url,
+    token,
   });
   return cachedRedis;
 }
 
 function isManagedAuthEnabled(): boolean {
-  return !!AUTH_SECRET && !!getRedisClient();
+  return !!getRuntimeEnvValue('AUTH_SECRET', AUTH_SECRET) && !!getRedisClient();
 }
 
 function isLegacyAuthConfigured(): boolean {
@@ -246,7 +262,7 @@ export async function getPublicAuthConfig(): Promise<PublicAuthConfig> {
   const loginMode = resolveLoginMode({
     managedAccountCount,
     managedAuthEnabled,
-    managedAuthForced: MANAGED_AUTH_FORCED,
+    managedAuthForced: getRuntimeEnvValue('MANAGED_AUTH_ENABLED') === 'true' || MANAGED_AUTH_FORCED,
     legacyAuthConfigured: isLegacyAuthConfigured(),
   });
 
@@ -272,8 +288,9 @@ async function generateLegacyProfileId(password: string): Promise<string> {
 }
 
 function resolveSessionSecret(loginMode: LoginMode): string | null {
-  if (AUTH_SECRET) {
-    return AUTH_SECRET;
+  const authSecret = getRuntimeEnvValue('AUTH_SECRET', AUTH_SECRET);
+  if (authSecret) {
+    return authSecret;
   }
 
   if (loginMode === 'legacy_password' && isLegacyAuthConfigured()) {
