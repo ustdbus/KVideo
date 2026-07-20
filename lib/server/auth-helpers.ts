@@ -87,7 +87,8 @@ export function shouldUseSecureSessionCookie(request?: SessionCookieProtocolRequ
   return request.nextUrl.protocol === 'https:';
 }
 
-const PBKDF2_ITERATIONS = 120_000;
+// Cloudflare Workers rejects PBKDF2 iteration counts above 100,000.
+const PBKDF2_ITERATIONS = 100_000;
 const PBKDF2_KEY_BYTES = 32;
 const SESSION_TOKEN_VERSION = 'v1';
 
