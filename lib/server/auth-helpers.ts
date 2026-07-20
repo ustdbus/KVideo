@@ -177,6 +177,14 @@ export async function verifyPassword(password: string, salt: string, expectedHas
   return actual.hash === expectedHash;
 }
 
+export function isBootstrapAdminCredential(
+  username: string,
+  password: string,
+  adminPassword: string
+): boolean {
+  return normalizeUsername(username) === 'admin' && !!adminPassword && password === adminPassword;
+}
+
 export async function signSessionPayload(payload: SessionPayload, secret: string): Promise<string> {
   const payloadBytes = encodeText(JSON.stringify(payload));
   const encodedPayload = encodeBase64Url(payloadBytes);

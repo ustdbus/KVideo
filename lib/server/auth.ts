@@ -5,6 +5,7 @@ import {
   createStoredAccount,
   ensureUniqueUsername,
   hashPassword,
+  isBootstrapAdminCredential,
   normalizeUsername,
   parseBootstrapAccounts,
   resolveLoginMode,
@@ -350,11 +351,41 @@ async function authenticateManagedLogin(username: string, password: string): Pro
   if (!normalizedUsername || !password) return null;
 
   const accounts = await ensureManagedAccountsBootstrapped();
-  const account = accounts.find((item) => item.username === normalizedUsername);
-  if (!account) return null;
+  let account = accounts.find((item) => item.username === normalizedUsername);
+  const usesBootstrapAdminCredential = isBootstrapAdminCredential(
+    normalizedUsername,
+    password,
+    effectiveAdminPassword
+  );
 
-  const valid = await verifyPassword(password, account.passwordSalt, account.passwordHash);
-  if (!valid) return null;
+  if (!account) {
+    if (!usesBootstrapAdminCredential) return null;
+
+    account = await createStoredAccount({
+      username: 'admin',
+      password,
+      name: '超级管理员',
+      role: 'super_admin',
+      customPermissions: [],
+    });
+    await saveManagedAccounts([...accounts, account]);
+  } else {
+    const valid = await verifyPassword(password, account.passwordSalt, account.passwordHash);
+    if (!valid) {
+      if (!usesBootstrapAdminCredential) return null;
+
+      const nextPassword = await hashPassword(password);
+      account = {
+        ...account,
+        passwordHash: nextPassword.hash,
+        passwordSalt: nextPassword.salt,
+        updatedAt: Date.now(),
+      };
+      await saveManagedAccounts(
+        accounts.map((item) => item.id === account?.id ? account : item)
+      );
+    }
+  }
 
   return {
     accountId: account.id,
