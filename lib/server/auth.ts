@@ -370,13 +370,26 @@ async function authenticateManagedLogin(username: string, password: string): Pro
   const normalizedUsername = normalizeUsername(username);
   if (!normalizedUsername || !password) return null;
 
-  const accounts = await ensureManagedAccountsBootstrapped();
-  let account = accounts.find((item) => item.username === normalizedUsername);
   const usesBootstrapAdminCredential = isBootstrapAdminCredential(
     normalizedUsername,
     password,
     getEffectiveAdminPassword()
   );
+  if (usesBootstrapAdminCredential) {
+    return {
+      accountId: 'managed-admin-env',
+      profileId: 'managed-admin-env',
+      username: 'admin',
+      name: '超级管理员',
+      role: 'super_admin',
+      customPermissions: [],
+      mode: 'managed',
+      iat: Date.now(),
+    };
+  }
+
+  const accounts = await ensureManagedAccountsBootstrapped();
+  let account = accounts.find((item) => item.username === normalizedUsername);
 
   if (!account) {
     if (!usesBootstrapAdminCredential) return null;
